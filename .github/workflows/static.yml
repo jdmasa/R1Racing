@@ -41,7 +41,7 @@ jobs:
       - name: QR Code Generator
         uses: snow-actions/qrcode@v1.1.0
         with:
-          text: '{"title": "R1Racing", "url": "${{ steps.get_url.outputs.page_url }}", "description": "R1Racing", "themeColor": "#FF9900"}'
+          text: '{"title": "R1Racing", "url": "${{ steps.get_url.outputs.page_url }}?${{ github.sha }}", "description": "R1Racing", "themeColor": "#FF9900"}'
           path: 'qrcode.png'
           
       - name: Setup Pages
