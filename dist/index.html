@@ -800,9 +800,22 @@ window.addEventListener('scrollDown', function() {
 window.addEventListener('sideClick', function() {
   if (gameState === 'over') { startGame(); return; }
   if (gameState !== 'playing') return;
+  // Short tap = brief brake pulse
   braking = true;
   clearTimeout(brakeTimer);
   brakeTimer = setTimeout(() => { braking = false; }, 380);
+});
+
+// Long press = hold brake for as long as button is held
+window.addEventListener('longPressStart', function() {
+  if (gameState !== 'playing') return;
+  clearTimeout(brakeTimer);
+  braking = true;
+});
+
+window.addEventListener('longPressEnd', function() {
+  if (gameState !== 'playing') return;
+  braking = false;
 });
 
 // Desktop keyboard fallback
