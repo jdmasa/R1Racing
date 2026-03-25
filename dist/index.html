@@ -1,0 +1,834 @@
+<!DOCTYPE html>
+<!--
+  R1 Creation: 2D Horizontal Car Race
+  - Car drives LEFT → RIGHT, auto-accelerates to max speed
+  - scrollUp   = steer UP  |  scrollDown = steer DOWN  |  sideClick = brake
+  - Off-road: slows car down (no crash)
+  - NPC hits: drain health bar — 8 hits = game over
+  - Per-lap countdown timer; each lap is longer → harder
+  Canvas 2D only. Fixed 240×282px.
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=240, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Car Race</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      width: 240px; height: 282px;
+      overflow: hidden; background: #000; font-family: monospace;
+    }
+    #gameCanvas { display: block; width: 240px; height: 282px; }
+
+    /* ── HUD ── */
+    #hud {
+      position: absolute; top: 6px; left: 0;
+      width: 240px; display: flex;
+      justify-content: space-between;
+      padding: 0 8px;
+      pointer-events: none; z-index: 10;
+    }
+    .hud-box {
+      background: rgba(0,0,0,0.62);
+      border: 1px solid #555; border-radius: 4px;
+      padding: 2px 6px; color: #fff; font-size: 10px;
+    }
+
+    /* ── Timer bar (full width, below HUD) ── */
+    #timerBarWrap {
+      position: absolute; top: 26px; left: 0;
+      width: 240px; padding: 0 8px;
+      pointer-events: none; z-index: 10;
+    }
+    #timerBar {
+      width: 100%; height: 5px;
+      background: #222; border-radius: 3px; overflow: hidden;
+    }
+    #timerFill {
+      height: 100%; width: 100%;
+      background: #0f0; border-radius: 3px;
+      transition: width 0.1s linear, background 0.3s;
+    }
+
+    /* ── Health bar (bottom centre) ── */
+    #healthWrap {
+      position: absolute; bottom: 8px; left: 50%;
+      transform: translateX(-50%);
+      display: flex; align-items: center; gap: 4px;
+      pointer-events: none; z-index: 10;
+    }
+    #healthLabel { color: #fff; font-size: 9px; font-family: monospace; }
+    #healthBar {
+      width: 80px; height: 8px;
+      background: #222; border: 1px solid #555; border-radius: 4px;
+      overflow: hidden;
+    }
+    #healthFill {
+      height: 100%; width: 100%;
+      background: linear-gradient(90deg, #f00, #f90, #0f0);
+      border-radius: 4px;
+      transition: width 0.15s, background 0.3s;
+    }
+
+    /* ── Speed bar (right edge, vertical) ── */
+    #speedBar {
+      position: absolute; right: 5px; top: 50%;
+      transform: translateY(-50%);
+      width: 6px; height: 80px;
+      background: #222; border: 1px solid #555; border-radius: 3px;
+      overflow: hidden; pointer-events: none; z-index: 10;
+      display: flex; flex-direction: column-reverse;
+    }
+    #speedFill {
+      width: 100%; height: 0%;
+      background: linear-gradient(0deg,#0f0,#ff0,#f00);
+      border-radius: 3px; transition: height 0.05s;
+    }
+
+    /* ── Splash screen ── */
+    #splash {
+      position: absolute; inset: 0; z-index: 30;
+      background: #000;
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      cursor: pointer;
+    }
+    #splash .logo {
+      font-size: 28px; font-weight: bold;
+      letter-spacing: 3px; text-align: center;
+      line-height: 1.15;
+    }
+    #splash .logo span.r1  { color: #f60; }
+    #splash .logo span.rac { color: #fff; }
+    #splash .logo span.ing { color: #ff0; }
+    #splash .tagline {
+      margin-top: 10px; font-size: 10px;
+      color: #888; letter-spacing: 1px; text-align: center;
+    }
+    #splash .tap {
+      margin-top: 28px; font-size: 11px; color: #0ef;
+      letter-spacing: 1px; animation: blink 1.1s ease-in-out infinite;
+    }
+    #splash .deco {
+      margin-top: 18px; font-size: 28px; opacity: 0.18;
+      letter-spacing: 6px;
+    }
+    @keyframes blink {
+      0%,100% { opacity: 1; } 50% { opacity: 0.2; }
+    }
+    /* Road strip decoration on splash */
+    #splash .road-deco {
+      position: absolute; bottom: 0; left: 0; right: 0;
+      height: 60px; overflow: hidden;
+    }
+    #splash .road-deco canvas { display: block; }
+
+    /* ── Overlays ── */
+    #overlay, #gameOver {
+      position: absolute; inset: 0;
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center; z-index: 20;
+    }
+    #overlay { background: rgba(0,0,0,0.88); color: #fff; display: none; }
+    #overlay h1 { font-size: 20px; color: #f60; letter-spacing: 3px; margin-bottom: 6px; }
+    #overlay p  { font-size: 10px; color: #aaa; text-align: center; margin: 3px 16px; line-height: 1.6; }
+    #overlay .hint { margin-top: 12px; font-size: 12px; color: #ff0; }
+    #overlay .ctrl-grid {
+      display: grid; grid-template-columns: auto 1fr;
+      gap: 3px 8px; margin: 6px 18px; font-size: 10px;
+    }
+    #overlay .ctrl-grid .key { color: #0ef; text-align: right; }
+    #overlay .ctrl-grid .val { color: #ccc; }
+
+    #gameOver {
+      background: rgba(120,0,0,0.88); color: #fff;
+      display: none; font-size: 20px; font-weight: bold; letter-spacing: 3px;
+    }
+    #gameOver small {
+      font-size: 11px; color: #fcc; margin-top: 6px;
+      display: block; font-weight: normal; letter-spacing: 0;
+    }
+  </style>
+</head>
+<body>
+
+<canvas id="gameCanvas" width="240" height="282"></canvas>
+
+<div id="hud">
+  <div class="hud-box" id="scoreBox">0m</div>
+  <div class="hud-box" id="lapBox">LAP 1</div>
+  <div class="hud-box" id="timerBox" style="color:#0f0">30s</div>
+</div>
+
+<!-- Timer countdown bar (full width, just below HUD) -->
+<div id="timerBarWrap">
+  <div id="timerBar"><div id="timerFill"></div></div>
+</div>
+
+<div id="healthWrap">
+  <div id="healthLabel">HP</div>
+  <div id="healthBar"><div id="healthFill"></div></div>
+</div>
+<div id="speedBar"><div id="speedFill"></div></div>
+
+<!-- ══ SPLASH SCREEN ══ -->
+<div id="splash">
+  <div class="logo">
+    <span class="r1">R1</span><br>
+    <span class="rac">RAC</span><span class="ing">ING</span>
+  </div>
+  <div class="tagline">rabbit r1 edition</div>
+  <div class="tap">touch screen to start</div>
+  <div class="deco">🏎 🏁 🏎</div>
+  <div class="road-deco">
+    <canvas id="splashRoad" width="240" height="60"></canvas>
+  </div>
+</div>
+
+<!-- ══ INSTRUCTIONS OVERLAY ══ -->
+<div id="overlay">
+  <h1>HOW TO RACE</h1>
+  <div class="ctrl-grid">
+    <span class="key">▲ Scroll UP</span>   <span class="val">Steer up</span>
+    <span class="key">▼ Scroll DOWN</span> <span class="val">Steer down</span>
+    <span class="key">● Side btn</span>    <span class="val">Brake</span>
+  </div>
+  <p>Auto-accelerates to top speed.<br>Off-road slows you down.<br>8 hits = game over!</p>
+  <p>Beat the timer each lap.<br>Grab <span style="color:#0ef">⏱</span> for time &amp; <span style="color:#f66">♥</span> for health.<br>More cars join every 2 laps!</p>
+  <div class="hint">▲ Scroll to race!</div>
+</div>
+
+<div id="gameOver">
+  <span id="gameOverReason">WRECKED!</span>
+  <small id="gameOverScore"></small>
+  <small>▲ Scroll to retry</small>
+</div>
+
+<script>
+// ══════════════════════════════════════════════════════════
+//  CONSTANTS
+// ══════════════════════════════════════════════════════════
+const W = 240, H = 282;
+const ROAD_H    = 120;
+const ROAD_MID  = H / 2;
+const CAR_W     = 22;
+const CAR_H     = 12;
+const CAR_SCR_X = 55;
+
+const MAX_SPEED     = 5.0;
+const MAX_SPEED_OFFROAD = 1.8;  // speed cap when off-road
+const ACCEL         = 0.055;
+const OFFROAD_DEC   = 0.08;     // extra drag off-road
+const BRAKE_DEC     = 0.30;
+const FRICTION      = 0.015;
+const STEER_SPD     = 2.6;
+const STEER_DECAY   = 0.80;
+const STEER_MAX     = 3.5;
+
+const CURVE_AMP  = 52;
+const CURVE_FREQ = 0.005;
+
+const MAX_HP = 8;
+const HIT_COOLDOWN_MS = 1200; // longer grace window → more forgiving
+
+// Lap system — distance and time grow each lap
+const LAP_BASE_DIST  = 2500;  // world units for lap 1 (shorter = easier start)
+const LAP_DIST_GROW  = 600;   // extra units added per lap
+const LAP_BASE_TIME  = 40;    // seconds for lap 1 (more generous)
+const LAP_TIME_GROW  = 8;     // extra seconds per lap
+
+// NPC count: starts gentle, grows by 1 every 2 laps, capped at 10
+const NPC_BASE_COUNT = 2;
+const NPC_LAP_STEP   = 2;     // add 1 NPC every N laps
+const NPC_MAX_COUNT  = 10;
+
+// Powerups
+const PU_TIME_BONUS = 8;      // seconds added by time powerup
+const PU_HP_BONUS   = 2;      // HP restored by health powerup
+const PU_SIZE       = 10;     // pickup collision radius (pixels)
+const PU_SPAWN_DIST = 450;    // min world-units between powerup spawns
+
+// ══════════════════════════════════════════════════════════
+//  STATE
+// ══════════════════════════════════════════════════════════
+const canvas = document.getElementById('gameCanvas');
+const ctx    = canvas.getContext('2d');
+
+let gameState = 'idle';
+let speed     = 0;
+let worldX    = 0;
+let carY      = ROAD_MID;
+let steerVel  = 0;
+let score     = 0;
+let lap       = 1;
+let hp        = MAX_HP;
+let lastHitTime = -Infinity;
+let offRoad   = false;
+
+// Lap/timer state
+let lapStartX     = 0;       // worldX at the start of current lap
+let lapTimeLeft   = LAP_BASE_TIME; // seconds remaining in current lap
+let lastFrameTime = 0;       // performance.now() of last frame
+
+let braking   = false;
+let brakeTimer = null;
+let steerUp   = false;
+let steerDown = false;
+let steerUpTimer   = null;
+let steerDownTimer = null;
+
+let hitFlash  = 0; // frames remaining for red flash
+
+let npcs     = [];
+let powerups = []; // { worldX, y, kind:'time'|'hp', pulse:0 }
+let nextPuX  = 0;  // worldX threshold for next powerup spawn check
+
+// Floating pickup label (shown briefly on collect)
+let puLabel  = null; // { text, x, y, ttl }
+
+// ══════════════════════════════════════════════════════════
+//  ROAD HELPERS
+// ══════════════════════════════════════════════════════════
+function roadCentreY(wx) {
+  return ROAD_MID + Math.sin(wx * CURVE_FREQ) * CURVE_AMP;
+}
+function roadEdges(wx) {
+  const mid = roadCentreY(wx);
+  return { top: mid - ROAD_H / 2, bot: mid + ROAD_H / 2 };
+}
+
+// ══════════════════════════════════════════════════════════
+//  NPC HELPERS
+// ══════════════════════════════════════════════════════════
+const NPC_COLORS = ['#e33','#3b3','#33e','#ea3','#a3e','#3ee','#e3a'];
+
+function spawnNPC() {
+  const spawnWX = worldX + W + 80 + Math.random() * 350;
+  const e = roadEdges(spawnWX);
+  npcs.push({
+    worldX : spawnWX,
+    y      : e.top + CAR_H + Math.random() * (ROAD_H - CAR_H * 2),
+    color  : NPC_COLORS[Math.floor(Math.random() * NPC_COLORS.length)],
+    relSpd : -(0.7 + Math.random() * 1.5),
+    hit    : false  // briefly marked when player collides (visual)
+  });
+}
+
+function npcTarget() {
+  // How many NPCs should be on screen for current lap
+  return Math.min(NPC_MAX_COUNT, NPC_BASE_COUNT + Math.floor((lap - 1) / NPC_LAP_STEP));
+}
+
+function resetGame() {
+  speed = 0; worldX = 0;
+  carY = ROAD_MID; steerVel = 0;
+  score = 0; lap = 1; hp = MAX_HP;
+  lastHitTime = -Infinity; offRoad = false; hitFlash = 0;
+  braking = false; steerUp = false; steerDown = false;
+  lapStartX   = 0;
+  lapTimeLeft = LAP_BASE_TIME;
+  lastFrameTime = performance.now();
+  npcs     = [];
+  powerups = [];
+  nextPuX  = PU_SPAWN_DIST;
+  puLabel  = null;
+  for (let i = 0; i < NPC_BASE_COUNT; i++) spawnNPC();
+  updateHealthBar();
+  updateTimerBar();
+}
+
+// ══════════════════════════════════════════════════════════
+//  DRAWING
+// ══════════════════════════════════════════════════════════
+function drawRoad() {
+  // Grass (darker when player is off-road for feedback)
+  ctx.fillStyle = offRoad ? '#1a4a1a' : '#2e6e2e';
+  ctx.fillRect(0, 0, W, H);
+
+  const STEP = 3;
+  for (let sx = 0; sx <= W; sx += STEP) {
+    const wx = worldX + sx - CAR_SCR_X;
+    const e  = roadEdges(wx);
+    const top = Math.max(0, e.top);
+    const bot = Math.min(H, e.bot);
+
+    ctx.fillStyle = '#4a4a4a';
+    ctx.fillRect(sx, top, STEP, bot - top);
+
+    ctx.fillStyle = '#ddd';
+    if (e.top > 0) ctx.fillRect(sx, e.top,    STEP, 3);
+    if (e.bot < H) ctx.fillRect(sx, e.bot - 3, STEP, 3);
+  }
+
+  // Yellow centre dashes
+  const DASH = 16, GAP = 10, PERIOD = DASH + GAP;
+  for (let sx = 0; sx <= W; sx += 2) {
+    const wx    = worldX + sx - CAR_SCR_X;
+    const mid   = roadCentreY(wx);
+    const phase = ((wx % PERIOD) + PERIOD) % PERIOD;
+    if (phase < DASH) {
+      ctx.fillStyle = 'rgba(255,210,0,0.75)';
+      ctx.fillRect(sx, mid - 1, 2, 2);
+    }
+  }
+}
+
+function drawCarShape(w, h, color, isBraking, isPlayer) {
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.roundRect(-w/2, -h/2, w, h, 3);
+  ctx.fill();
+
+  // Windscreen
+  ctx.fillStyle = 'rgba(150,215,255,0.75)';
+  const wsX = isPlayer ? w/2 - w*0.36 : -w/2;
+  ctx.fillRect(wsX, -h/2 + 2, w * 0.32, h - 4);
+
+  // Wheels
+  ctx.fillStyle = '#111';
+  const ww = 5, wh = 3;
+  ctx.fillRect(-w/2 + 3,       -h/2 - wh, ww, wh);
+  ctx.fillRect( w/2 - 3 - ww,  -h/2 - wh, ww, wh);
+  ctx.fillRect(-w/2 + 3,        h/2,       ww, wh);
+  ctx.fillRect( w/2 - 3 - ww,   h/2,       ww, wh);
+
+  // Tail lights
+  ctx.fillStyle = isBraking ? '#f90' : '#b00';
+  ctx.fillRect(-w/2, -h/2 + 2, 3, 3);
+  ctx.fillRect(-w/2,  h/2 - 5, 3, 3);
+}
+
+function drawNPCs() {
+  for (const npc of npcs) {
+    const sx = CAR_SCR_X + (npc.worldX - worldX);
+    if (sx < -CAR_W - 5 || sx > W + CAR_W + 5) continue;
+    ctx.save();
+    ctx.translate(sx, npc.y);
+    // Flash white briefly on hit
+    const col = npc.hit ? '#fff' : npc.color;
+    drawCarShape(CAR_W, CAR_H, col, false, false);
+    ctx.restore();
+  }
+}
+
+function drawPlayerCar() {
+  ctx.save();
+  ctx.translate(CAR_SCR_X, carY);
+
+  // Red flash overlay when hit
+  const carColor = (hitFlash > 0 && Math.floor(hitFlash / 3) % 2 === 0) ? '#f44' : '#1af';
+  drawCarShape(CAR_W, CAR_H, carColor, braking, true);
+
+  ctx.restore();
+
+  // Off-road dust particles
+  if (offRoad && speed > 0.5) {
+    ctx.fillStyle = 'rgba(180,140,80,' + (0.25 + Math.random() * 0.25) + ')';
+    ctx.beginPath();
+    ctx.arc(CAR_SCR_X - CAR_W/2 - 4 - Math.random()*6, carY + (Math.random()-0.5)*8,
+            2 + Math.random()*3, 0, Math.PI*2);
+    ctx.fill();
+  }
+
+  // Brake smoke
+  if (braking && !offRoad && speed > 0.8) {
+    ctx.fillStyle = 'rgba(200,200,200,' + (0.2 + Math.random() * 0.2) + ')';
+    ctx.beginPath();
+    ctx.arc(CAR_SCR_X - CAR_W/2 - 5, carY, 3 + Math.random()*3, 0, Math.PI*2);
+    ctx.fill();
+  }
+}
+
+function drawPowerups() {
+  const t = performance.now() / 1000;
+  for (const pu of powerups) {
+    const sx = CAR_SCR_X + (pu.worldX - worldX);
+    if (sx < -PU_SIZE * 2 || sx > W + PU_SIZE * 2) continue;
+
+    // Pulsing glow
+    const pulse = 0.7 + 0.3 * Math.sin(t * 4 + pu.worldX * 0.01);
+    const r = PU_SIZE * pulse;
+
+    ctx.save();
+    ctx.translate(sx, pu.y);
+
+    if (pu.kind === 'time') {
+      // Clock icon — cyan circle with ⏱ feel
+      ctx.beginPath();
+      ctx.arc(0, 0, r, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(0,220,255,' + (0.25 * pulse) + ')';
+      ctx.fill();
+      ctx.strokeStyle = '#0ef';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      // ⏱ symbol
+      ctx.fillStyle = '#0ef';
+      ctx.font = 'bold ' + Math.round(r * 1.1) + 'px monospace';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('⏱', 0, 0);
+    } else {
+      // Heart icon — red circle
+      ctx.beginPath();
+      ctx.arc(0, 0, r, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(255,60,60,' + (0.25 * pulse) + ')';
+      ctx.fill();
+      ctx.strokeStyle = '#f44';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      ctx.fillStyle = '#f44';
+      ctx.font = 'bold ' + Math.round(r * 1.1) + 'px monospace';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('♥', 0, 0);
+    }
+
+    ctx.restore();
+  }
+}
+
+function drawPickupLabel() {
+  if (!puLabel || puLabel.ttl <= 0) return;
+  const alpha = Math.min(1, puLabel.ttl / 30);
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.font = 'bold 11px monospace';
+  ctx.textAlign = 'center';
+  ctx.fillStyle = puLabel.color || '#fff';
+  ctx.fillText(puLabel.text, puLabel.x, puLabel.y - (30 - puLabel.ttl) * 0.8);
+  ctx.restore();
+  puLabel.ttl--;
+}
+
+function updateHealthBar() {
+  const pct = (hp / MAX_HP) * 100;
+  const fill = document.getElementById('healthFill');
+  fill.style.width = pct + '%';
+  // Colour shifts red as hp drops
+  if (hp <= 2)      fill.style.background = '#f00';
+  else if (hp <= 4) fill.style.background = 'linear-gradient(90deg,#f00,#f90)';
+  else              fill.style.background = 'linear-gradient(90deg,#f00,#f90,#0f0)';
+}
+
+function updateTimerBar() {
+  const lapTime = LAP_BASE_TIME + (lap - 1) * LAP_TIME_GROW;
+  const pct     = Math.max(0, lapTimeLeft / lapTime) * 100;
+  const fill    = document.getElementById('timerFill');
+  const box     = document.getElementById('timerBox');
+  fill.style.width = pct + '%';
+  // Colour: green → yellow → red as time runs low
+  const colour = pct > 50 ? '#0f0' : pct > 25 ? '#ff0' : '#f00';
+  fill.style.background = colour;
+  box.style.color       = colour;
+  box.textContent       = Math.ceil(lapTimeLeft) + 's';
+}
+
+function updateHUD() {
+  document.getElementById('scoreBox').textContent = score + 'm';
+  document.getElementById('lapBox').textContent   = 'LAP ' + lap;
+  document.getElementById('speedFill').style.height = ((speed / MAX_SPEED) * 100) + '%';
+  updateHealthBar();
+  updateTimerBar();
+}
+
+// ══════════════════════════════════════════════════════════
+//  UPDATE
+// ══════════════════════════════════════════════════════════
+function update() {
+  const now = performance.now();
+  const dt  = Math.min((now - lastFrameTime) / 1000, 0.05); // seconds, capped
+  lastFrameTime = now;
+
+  // ── Off-road detection ──────────────────────────────────
+  const wx = worldX;
+  const e  = roadEdges(wx);
+  offRoad = carY < e.top + CAR_H/2 || carY > e.bot - CAR_H/2;
+
+  // ── Speed ───────────────────────────────────────────────
+  if (braking) {
+    speed = Math.max(0, speed - BRAKE_DEC);
+  } else if (offRoad) {
+    speed = Math.max(0, Math.min(MAX_SPEED_OFFROAD, speed - OFFROAD_DEC));
+  } else {
+    speed = Math.min(MAX_SPEED, speed + ACCEL - FRICTION);
+  }
+
+  worldX += speed;
+  score   = Math.max(score, Math.floor(worldX / 5));
+
+  // ── Lap timer countdown ─────────────────────────────────
+  lapTimeLeft -= dt;
+  if (lapTimeLeft <= 0) {
+    gameOver('TIME OUT!'); return;
+  }
+
+  // ── Lap completion check ────────────────────────────────
+  const lapDist = LAP_BASE_DIST + (lap - 1) * LAP_DIST_GROW;
+  if (worldX - lapStartX >= lapDist) {
+    lap++;
+    lapStartX   = worldX;
+    lapTimeLeft = LAP_BASE_TIME + (lap - 1) * LAP_TIME_GROW;
+    flashBorder('#ff0');
+  }
+
+  // ── Steering ─────────────────────────────────────────────
+  if (steerUp)        steerVel = Math.max(steerVel - STEER_SPD, -STEER_MAX);
+  else if (steerDown) steerVel = Math.min(steerVel + STEER_SPD,  STEER_MAX);
+  else                steerVel *= STEER_DECAY;
+
+  // Harder to steer off-road
+  const speedFactor = (0.3 + 0.7 * (speed / MAX_SPEED)) * (offRoad ? 0.6 : 1.0);
+  carY += steerVel * speedFactor;
+
+  // Soft boundary — allow going off-road but not infinitely
+  const HARD_MARGIN = 20;
+  carY = Math.max(e.top - HARD_MARGIN, Math.min(e.bot + HARD_MARGIN, carY));
+
+  // ── NPC movement ─────────────────────────────────────────
+  for (const npc of npcs) {
+    npc.worldX += npc.relSpd;
+    const nc = roadCentreY(npc.worldX);
+    npc.y += (nc - roadCentreY(npc.worldX - npc.relSpd)) * 0.9;
+    if (npc.hit) npc.hit = false;
+  }
+
+  // Cull off-screen NPCs; maintain dynamic target count for current lap
+  npcs = npcs.filter(n => n.worldX > worldX - 60);
+  const target = npcTarget();
+  while (npcs.length < target) spawnNPC();
+
+  // ── NPC collision ─────────────────────────────────────────
+  if (now - lastHitTime > HIT_COOLDOWN_MS) {
+    for (const npc of npcs) {
+      const sx = CAR_SCR_X + (npc.worldX - worldX);
+      if (Math.abs(sx - CAR_SCR_X) < CAR_W * 0.82 &&
+          Math.abs(npc.y - carY)   < CAR_H * 0.82) {
+        hp--;
+        lastHitTime = now;
+        hitFlash = 18;
+        npc.hit  = true;
+        flashBorder('#f00');
+        updateHealthBar();
+        speed    = Math.max(0, speed - 1.5);
+        steerVel = (carY < npc.y ? -1.5 : 1.5);
+        if (hp <= 0) { gameOver('WRECKED!'); return; }
+        break;
+      }
+    }
+  }
+
+  // ── Powerup spawning ──────────────────────────────────────
+  // Spawn chance decreases each lap; base probability per spawn window = 1/(lap)
+  if (worldX > nextPuX) {
+    const spawnChance = 1 / lap; // lap1=100%, lap2=50%, lap3=33%…
+    if (Math.random() < spawnChance) {
+      const spawnWX = worldX + W + 60 + Math.random() * 200;
+      const e2 = roadEdges(spawnWX);
+      const kind = (hp < MAX_HP && Math.random() < 0.4) ? 'hp' : 'time';
+      powerups.push({
+        worldX : spawnWX,
+        y      : e2.top + PU_SIZE * 2 + Math.random() * (ROAD_H - PU_SIZE * 4),
+        kind   : kind
+      });
+    }
+    nextPuX = worldX + PU_SPAWN_DIST + Math.random() * 200;
+  }
+
+  // ── Powerup collection ────────────────────────────────────
+  powerups = powerups.filter(pu => {
+    const sx = CAR_SCR_X + (pu.worldX - worldX);
+    // Cull if too far behind
+    if (pu.worldX < worldX - 40) return false;
+    // Check collection
+    if (Math.abs(sx - CAR_SCR_X) < PU_SIZE + CAR_W / 2 &&
+        Math.abs(pu.y - carY)    < PU_SIZE + CAR_H / 2) {
+      if (pu.kind === 'time') {
+        lapTimeLeft = Math.min(lapTimeLeft + PU_TIME_BONUS,
+                               LAP_BASE_TIME + (lap - 1) * LAP_TIME_GROW);
+        puLabel = { text: '+' + PU_TIME_BONUS + 's', x: CAR_SCR_X, y: carY - 16,
+                    color: '#0ef', ttl: 40 };
+      } else {
+        hp = Math.min(MAX_HP, hp + PU_HP_BONUS);
+        updateHealthBar();
+        puLabel = { text: '+' + PU_HP_BONUS + 'HP', x: CAR_SCR_X, y: carY - 16,
+                    color: '#f66', ttl: 40 };
+      }
+      flashBorder(pu.kind === 'time' ? '#0ef' : '#f44');
+      return false; // remove collected powerup
+    }
+    return true;
+  });
+
+  // Tick hit flash
+  if (hitFlash > 0) hitFlash--;
+}
+
+// ══════════════════════════════════════════════════════════
+//  LIFECYCLE
+// ══════════════════════════════════════════════════════════
+function startGame() {
+  resetGame();
+  lastFrameTime = performance.now();
+  document.getElementById('overlay').style.display  = 'none';
+  document.getElementById('gameOver').style.display = 'none';
+  flashBorder('#0c0');
+  gameState = 'playing';
+}
+
+function gameOver(reason) {
+  reason = reason || 'WRECKED!';
+  gameState = 'over'; speed = 0;
+  flashBorder('#c00');
+  document.getElementById('gameOverReason').textContent = reason;
+  document.getElementById('gameOverScore').textContent =
+    'Score: ' + score + 'm  |  Lap: ' + lap;
+  document.getElementById('gameOver').style.display = 'flex';
+  // Re-wire scroll/side on game-over to retry
+  function retryOnce() {
+    document.getElementById('gameOver').style.display = 'none';
+    window.removeEventListener('scrollUp',   retryOnce);
+    window.removeEventListener('scrollDown', retryOnce);
+    window.removeEventListener('sideClick',  retryOnce);
+    startGame();
+  }
+  // Small delay to avoid accidental immediate restart
+  setTimeout(() => {
+    window.addEventListener('scrollUp',   retryOnce);
+    window.addEventListener('scrollDown', retryOnce);
+    window.addEventListener('sideClick',  retryOnce);
+  }, 600);
+}
+
+function flashBorder(color) {
+  document.body.style.outline = '3px solid ' + color;
+  setTimeout(() => { document.body.style.outline = '3px solid #222'; }, 500);
+}
+
+// ══════════════════════════════════════════════════════════
+//  SPLASH SCREEN
+// ══════════════════════════════════════════════════════════
+(function initSplash() {
+  const splash  = document.getElementById('splash');
+  const sCanvas = document.getElementById('splashRoad');
+  const sCtx    = sCanvas.getContext('2d');
+  let   sOffset = 0;
+  let   sRaf    = null;
+
+  function drawSplashRoad() {
+    sCtx.clearRect(0, 0, 240, 60);
+    // road strip
+    sCtx.fillStyle = '#444';
+    sCtx.fillRect(0, 15, 240, 30);
+    // edges
+    sCtx.fillStyle = '#ccc';
+    sCtx.fillRect(0, 15, 240, 3);
+    sCtx.fillRect(0, 42, 240, 3);
+    // scrolling dashes
+    const DASH = 20, GAP = 14, PERIOD = DASH + GAP;
+    sCtx.fillStyle = 'rgba(255,210,0,0.8)';
+    for (let x = -(PERIOD - (sOffset % PERIOD)); x < 240; x += PERIOD) {
+      sCtx.fillRect(x, 28, DASH, 3);
+    }
+    // tiny cars
+    [[sOffset % 260 - 20, 22, '#1af'],
+     [(sOffset * 0.7 + 100) % 280 - 30, 34, '#e33']].forEach(([cx, cy, col]) => {
+      sCtx.fillStyle = col;
+      sCtx.fillRect(cx, cy, 16, 8);
+      sCtx.fillStyle = 'rgba(150,215,255,0.7)';
+      sCtx.fillRect(cx + 9, cy + 1, 5, 6);
+    });
+    sOffset += 1.5;
+    sRaf = requestAnimationFrame(drawSplashRoad);
+  }
+
+  function dismissSplash() {
+    cancelAnimationFrame(sRaf);
+    splash.style.transition = 'opacity 0.35s';
+    splash.style.opacity    = '0';
+    setTimeout(() => {
+      splash.style.display = 'none';
+      document.getElementById('overlay').style.display = 'flex';
+    }, 350);
+    splash.removeEventListener('touchstart', dismissSplash);
+    splash.removeEventListener('click',      dismissSplash);
+    window.removeEventListener('scrollUp',   dismissSplash);
+    window.removeEventListener('scrollDown', dismissSplash);
+    window.removeEventListener('sideClick',  dismissSplash);
+    window.removeEventListener('keydown',    kbDismiss);
+  }
+
+  function kbDismiss(e) {
+    if (['ArrowUp','ArrowDown',' ','Enter'].includes(e.key)) dismissSplash();
+  }
+
+  drawSplashRoad();
+  splash.addEventListener('touchstart', dismissSplash);
+  splash.addEventListener('click',      dismissSplash);
+  window.addEventListener('scrollUp',   dismissSplash);
+  window.addEventListener('scrollDown', dismissSplash);
+  window.addEventListener('sideClick',  dismissSplash);
+  window.addEventListener('keydown',    kbDismiss);
+})();
+
+// ══════════════════════════════════════════════════════════
+//  HARDWARE EVENTS
+// ══════════════════════════════════════════════════════════
+window.addEventListener('scrollUp', function() {
+  // Only start the game from the instructions screen, not the splash
+  const overlay = document.getElementById('overlay');
+  if (gameState !== 'playing' && overlay.style.display !== 'none') {
+    startGame(); return;
+  }
+  if (gameState !== 'playing') return;
+  steerUp = true; steerDown = false;
+  clearTimeout(steerUpTimer);
+  steerUpTimer = setTimeout(() => { steerUp = false; }, 180);
+});
+
+window.addEventListener('scrollDown', function() {
+  const overlay = document.getElementById('overlay');
+  if (gameState !== 'playing' && overlay.style.display !== 'none') {
+    startGame(); return;
+  }
+  if (gameState !== 'playing') return;
+  steerDown = true; steerUp = false;
+  clearTimeout(steerDownTimer);
+  steerDownTimer = setTimeout(() => { steerDown = false; }, 180);
+});
+
+window.addEventListener('sideClick', function() {
+  if (gameState === 'over') { startGame(); return; }
+  if (gameState !== 'playing') return;
+  braking = true;
+  clearTimeout(brakeTimer);
+  brakeTimer = setTimeout(() => { braking = false; }, 380);
+});
+
+// Desktop keyboard fallback
+window.addEventListener('keydown', function(e) {
+  if (e.key === 'ArrowUp')   window.dispatchEvent(new Event('scrollUp'));
+  if (e.key === 'ArrowDown') window.dispatchEvent(new Event('scrollDown'));
+  if (e.key === ' ')         window.dispatchEvent(new Event('sideClick'));
+  e.preventDefault();
+});
+
+// ══════════════════════════════════════════════════════════
+//  GAME LOOP
+// ══════════════════════════════════════════════════════════
+function loop() {
+  ctx.clearRect(0, 0, W, H);
+  drawRoad();
+  drawPowerups();
+  drawNPCs();
+  if (gameState !== 'idle') drawPlayerCar();
+  drawPickupLabel();
+  if (gameState === 'playing') { update(); updateHUD(); }
+  requestAnimationFrame(loop);
+}
+
+document.body.style.outline = '3px solid #222';
+loop();
+</script>
+</body>
+</html>
