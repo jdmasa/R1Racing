@@ -33,8 +33,6 @@ Scan the QR code below to install R1 Racing directly on your Rabbit R1:
 
 ![Install QR Code](https://jdmasa.github.io/R1Racing/qrcode.png)
 
-Or visit [rabbit.tech/creations](https://rabbit.tech/creations) and deploy `index.html` manually.
-
 ---
 
 ## 🛠️ Built with Claude
